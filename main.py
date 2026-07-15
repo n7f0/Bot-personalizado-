@@ -53,7 +53,7 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# FUNÇÃO DE CONVERSÃO COM DEBUG
+# FUNÇÃO DE CONVERSÃO CORRIGIDA
 # ==========================================
 async def converte_link_discord(token, app_id, url):
     if not url or not url.startswith("http"): return url
@@ -61,17 +61,17 @@ async def converte_link_discord(token, app_id, url):
     async with aiohttp.ClientSession() as session:
         headers = {"Authorization": token, "Content-Type": "application/json"}
         payload = {"urls": [url]}
-        url_api = f"https://discord.com/api/v9/oauth2/applications/{app_id}/external-assets"
+        # URL corrigida sem o /oauth2/
+        url_api = f"https://discord.com/api/v9/applications/{app_id}/external-assets"
         
         try:
             async with session.post(url_api, json=payload, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # Retorna o mp:external/..
                     return data[0].get("external_asset_path", url)
                 else:
                     error_text = await resp.text()
-                    print(f"❌ DEBUG API: Status {resp.status} | Resposta: {error_text}")
+                    print(f"❌ DEBUG API: Status {resp.status} | URL: {url_api} | Resposta: {error_text}")
                     return url
         except Exception as e:
             print(f"❌ DEBUG ERRO: {e}")
@@ -154,12 +154,11 @@ class RPCImageModal(discord.ui.Modal, title='Configurar Imagens'):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        # O "Hacker Method" aqui:
         large = await converte_link_discord(config["user_token"], self.app_id.value, self.large_img.value)
         small = await converte_link_discord(config["user_token"], self.app_id.value, self.small_img.value)
         config["rpc_state"].update({"application_id": self.app_id.value, "large_image": large, "small_image": small})
         save_config(config)
-        await interaction.followup.send("✅ Imagens processadas! Se falhar, veja os logs no Portainer.", ephemeral=True)
+        await interaction.followup.send("✅ Imagens processadas! Confira os logs no Portainer.", ephemeral=True)
         if config["rpc_active"]: restart_gateway()
 
 class PanelView(discord.ui.View):
