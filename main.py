@@ -26,8 +26,7 @@ def load_config():
     }
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, "r") as f: data = json.load(f)
-            return data
+            with open(CONFIG_FILE, "r") as f: return json.load(f)
         except: return default_config
     return default_config
 
@@ -38,7 +37,7 @@ config = load_config()
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
 # ==========================================
-# GATEWAY (SIMPLES E ESTÁVEL)
+# GATEWAY
 # ==========================================
 async def send_heartbeat(ws, interval):
     while not ws.closed:
@@ -78,22 +77,30 @@ async def user_gateway():
 # ==========================================
 # UI E MODAIS
 # ==========================================
+class TokenModal(discord.ui.Modal, title='Configurar Token'):
+    token = discord.ui.TextInput(label='Token da sua conta', style=discord.TextStyle.short)
+    async def on_submit(self, interaction):
+        config["user_token"] = self.token.value
+        save_config(config)
+        await interaction.response.send_message("✅ Token salvo!", ephemeral=True)
+
 class RPCImageModal(discord.ui.Modal, title='Configurar Imagens (Assets)'):
-    large_img = discord.ui.TextInput(label='Nome do Asset Grande', placeholder='ex: imagem_principal', default=config["rpc_state"]["large_image"])
-    
-    async def on_submit(self, interaction: discord.Interaction):
+    large_img = discord.ui.TextInput(label='Nome do Asset Grande', placeholder='ex: teste', default=config["rpc_state"]["large_image"])
+    async def on_submit(self, interaction):
         config["rpc_state"]["large_image"] = self.large_img.value
         save_config(config)
-        await interaction.response.send_message("✅ Asset configurado! Use nomes exatos do Portal.", ephemeral=True)
+        await interaction.response.send_message("✅ Asset atualizado!", ephemeral=True)
 
 class PanelView(discord.ui.View):
+    @discord.ui.button(label="1. Token", style=discord.ButtonStyle.primary)
+    async def btn_token(self, interaction, button): await interaction.response.send_modal(TokenModal())
     @discord.ui.button(label="3. Imagens (Nomes)", style=discord.ButtonStyle.secondary)
     async def btn_img(self, interaction, button): await interaction.response.send_modal(RPCImageModal())
     @discord.ui.button(label="Ligar RPC", style=discord.ButtonStyle.success)
     async def btn_start(self, interaction, button):
-        config["rpc_active"] = True; save_config(config); await interaction.response.send_message("✅ Ligado!", ephemeral=True)
+        config["rpc_active"] = True; save_config(config); bot.loop.create_task(user_gateway()); await interaction.response.send_message("✅ Ligado!", ephemeral=True)
 
 @bot.tree.command(name="painel")
-async def painel(interaction): await interaction.response.send_message("Painel", view=PanelView())
+async def painel(interaction): await interaction.response.send_message("Painel CustomRP", view=PanelView())
 
 bot.run(BOT_TOKEN)
