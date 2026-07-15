@@ -30,7 +30,7 @@ def load_config():
             "application_id": "1525126100034785400",
             "details": "A navegar...",
             "state": "Modo Furtivo",
-            "large_image": "", # Deixamos vazio por padrão para você colar o link
+            "large_image": "",
             "large_text": "Loja Oficial",
             "small_image": "",
             "small_text": "Online"
@@ -63,12 +63,36 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# FUNÇÕES DO GATEWAY (O MOTOR DO CUSTOM RP)
+# FUNÇÃO AUXILIAR DE CONVERSÃO (HACKER METHOD)
+# ==========================================
+async def converte_link_discord(token, app_id, url):
+    """Converte links HTTP crus para o formato mp:external exigido pelo Gateway."""
+    if not url or not url.startswith("http"):
+        return url
+        
+    async with aiohttp.ClientSession() as session:
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        payload = {"urls": [url]}
+        url_api = f"https://discord.com/api/v9/oauth2/applications/{app_id}/external-assets"
+        
+        try:
+            async with session.post(url_api, json=payload, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data[0].get("external_asset_path", url)
+        except Exception as e:
+            print(f"Erro ao converter asset: {e}")
+            
+    return url
+
+# ==========================================
+# FUNÇÕES DO GATEWAY
 # ==========================================
 def get_presence_payload():
     state = config["rpc_state"]
-    
-    # Prepara os assets apenas se tiver link
     assets = {}
     if state["large_image"]:
         assets["large_image"] = state["large_image"]
@@ -137,58 +161,49 @@ def restart_gateway():
         gateway_task = bot.loop.create_task(user_gateway())
 
 # ==========================================
-# INTERFACE UI (CAIXAS DE TEXTO IGUAIS AO CUSTOMRP)
+# INTERFACE UI
 # ==========================================
 class TokenModal(discord.ui.Modal, title='Configurar Token Pessoal'):
-    token_input = discord.ui.TextInput(
-        label='Token da sua conta do Discord',
-        style=discord.TextStyle.short,
-        required=True
-    )
+    token_input = discord.ui.TextInput(label='Token da sua conta', style=discord.TextStyle.short, required=True)
     async def on_submit(self, interaction: discord.Interaction):
         config["user_token"] = self.token_input.value
         save_config(config)
-        await interaction.response.send_message("✅ Token guardado com sucesso!", ephemeral=True)
+        await interaction.response.send_message("✅ Token guardado!", ephemeral=True)
         if config["rpc_active"]: restart_gateway()
 
 class RPCTextModal(discord.ui.Modal, title='Configurar Textos'):
-    name = discord.ui.TextInput(label='Nome Principal (Ex: Nexzy Store)', default=config["rpc_state"]["name"])
-    details = discord.ui.TextInput(label='Detalhes (Primeira linha)', default=config["rpc_state"]["details"])
-    state = discord.ui.TextInput(label='Estado (Segunda linha)', default=config["rpc_state"]["state"])
-
+    name = discord.ui.TextInput(label='Nome Principal', default=config["rpc_state"]["name"])
+    details = discord.ui.TextInput(label='Detalhes', default=config["rpc_state"]["details"])
+    state = discord.ui.TextInput(label='Estado', default=config["rpc_state"]["state"])
     async def on_submit(self, interaction: discord.Interaction):
         config["rpc_state"]["name"] = self.name.value
         config["rpc_state"]["details"] = self.details.value
         config["rpc_state"]["state"] = self.state.value
         save_config(config)
-        await interaction.response.send_message("✅ Textos configurados!", ephemeral=True)
+        await interaction.response.send_message("✅ Textos salvos!", ephemeral=True)
         if config["rpc_active"]: restart_gateway()
 
 class RPCImageModal(discord.ui.Modal, title='Configurar Imagens (Links)'):
     app_id = discord.ui.TextInput(label='Client ID', default=config["rpc_state"]["application_id"])
-    
-    large_img = discord.ui.TextInput(
-        label='Link da Imagem Grande', 
-        style=discord.TextStyle.short,
-        placeholder='https://...', 
-        default=config["rpc_state"]["large_image"],
-        required=False
-    )
-    
-    small_img = discord.ui.TextInput(
-        label='Link da Imagem Pequena', 
-        style=discord.TextStyle.short,
-        placeholder='https://...', 
-        default=config["rpc_state"]["small_image"],
-        required=False
-    )
+    large_img = discord.ui.TextInput(label='Link da Imagem Grande', style=discord.TextStyle.short, placeholder='https://...', default=config["rpc_state"]["large_image"], required=False)
+    small_img = discord.ui.TextInput(label='Link da Imagem Pequena', style=discord.TextStyle.short, placeholder='https://...', default=config["rpc_state"]["small_image"], required=False)
 
     async def on_submit(self, interaction: discord.Interaction):
-        config["rpc_state"]["application_id"] = self.app_id.value
-        config["rpc_state"]["large_image"] = self.large_img.value
-        config["rpc_state"]["small_image"] = self.small_img.value
+        await interaction.response.defer(ephemeral=True)
+        
+        token = config.get("user_token")
+        app_id_val = self.app_id.value
+        
+        # Converte via API antes de salvar
+        large_asset = await converte_link_discord(token, app_id_val, self.large_img.value)
+        small_asset = await converte_link_discord(token, app_id_val, self.small_img.value)
+        
+        config["rpc_state"]["application_id"] = app_id_val
+        config["rpc_state"]["large_image"] = large_asset
+        config["rpc_state"]["small_image"] = small_asset
         save_config(config)
-        await interaction.response.send_message("✅ Links de imagem salvos! O Discord vai carregar agora.", ephemeral=True)
+        
+        await interaction.followup.send("✅ Imagens processadas e salvas!", ephemeral=True)
         if config["rpc_active"]: restart_gateway()
 
 class PanelView(discord.ui.View):
@@ -207,24 +222,20 @@ class PanelView(discord.ui.View):
 
     @discord.ui.button(label="1. Token", style=discord.ButtonStyle.primary, emoji="🔑", row=0)
     async def btn_token(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if await self.check_owner(interaction):
-            await interaction.response.send_modal(TokenModal())
+        if await self.check_owner(interaction): await interaction.response.send_modal(TokenModal())
 
     @discord.ui.button(label="2. Textos", style=discord.ButtonStyle.secondary, emoji="📝", row=0)
     async def btn_text(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if await self.check_owner(interaction):
-            await interaction.response.send_modal(RPCTextModal())
+        if await self.check_owner(interaction): await interaction.response.send_modal(RPCTextModal())
 
     @discord.ui.button(label="3. Imagens (Links)", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
     async def btn_img(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if await self.check_owner(interaction):
-            await interaction.response.send_modal(RPCImageModal())
+        if await self.check_owner(interaction): await interaction.response.send_modal(RPCImageModal())
 
     @discord.ui.button(label="Ligar RPC", style=discord.ButtonStyle.success, emoji="▶️", row=1)
     async def btn_start(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self.check_owner(interaction):
-            if not config.get("user_token"):
-                return await interaction.response.send_message("❌ Configure o Token primeiro!", ephemeral=True)
+            if not config.get("user_token"): return await interaction.response.send_message("❌ Configure o Token primeiro!", ephemeral=True)
             config["rpc_active"] = True
             save_config(config)
             restart_gateway()
@@ -235,13 +246,9 @@ class PanelView(discord.ui.View):
         if await self.check_owner(interaction):
             config["rpc_active"] = False
             save_config(config)
-            if gateway_ws and not gateway_ws.closed:
-                await gateway_ws.close()
+            if gateway_ws and not gateway_ws.closed: await gateway_ws.close()
             await interaction.response.send_message("🛑 Rich Presence Desligado!", ephemeral=True)
 
-# ==========================================
-# EVENTOS E COMANDOS
-# ==========================================
 @bot.event
 async def on_ready():
     print(f"🤖 CustomRP Cloud online como: {bot.user}")
@@ -251,15 +258,7 @@ async def on_ready():
 
 @bot.tree.command(name="painel", description="Abre o painel estilo CustomRP.")
 async def painel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="☁️ CustomRP na Nuvem (Portainer)",
-        description="Seu próprio CustomRP rodando 24 horas por dia.\n\n"
-                    "**Como usar as imagens:**\n"
-                    "1. Envie a foto num chat do Discord.\n"
-                    "2. Clique em 'Copiar link da imagem' (`https://cdn.discordapp...`).\n"
-                    "3. Clique em **3. Imagens (Links)** e cole o link lá!",
-        color=discord.Color.brand_green()
-    )
+    embed = discord.Embed(title="☁️ CustomRP na Nuvem", description="Seu próprio CustomRP rodando 24 horas.", color=discord.Color.brand_green())
     await interaction.response.send_message(embed=embed, view=PanelView())
 
 if __name__ == "__main__":
