@@ -15,7 +15,6 @@ if not BOT_TOKEN:
     print("❌ ERRO: Falta a variável de ambiente (BOT_TOKEN).")
     exit(1)
 
-# Garante que a pasta 'data' existe para o volume do Docker não apagar os dados
 if not os.path.exists("data"):
     os.makedirs("data")
 
@@ -31,9 +30,9 @@ def load_config():
             "application_id": "1525126100034785400",
             "details": "A navegar...",
             "state": "Modo Furtivo",
-            "large_image": "nexzy_store",
+            "large_image": "", # Deixamos vazio por padrão para você colar o link
             "large_text": "Loja Oficial",
-            "small_image": "nexzy_store",
+            "small_image": "",
             "small_text": "Online"
         }
     }
@@ -64,10 +63,20 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# FUNÇÕES DO GATEWAY (CONTA PESSOAL)
+# FUNÇÕES DO GATEWAY (O MOTOR DO CUSTOM RP)
 # ==========================================
 def get_presence_payload():
     state = config["rpc_state"]
+    
+    # Prepara os assets apenas se tiver link
+    assets = {}
+    if state["large_image"]:
+        assets["large_image"] = state["large_image"]
+        assets["large_text"] = state["large_text"]
+    if state["small_image"]:
+        assets["small_image"] = state["small_image"]
+        assets["small_text"] = state["small_text"]
+
     return {
         "status": "online",
         "since": 0,
@@ -77,12 +86,7 @@ def get_presence_payload():
             "application_id": state["application_id"],
             "details": state["details"],
             "state": state["state"],
-            "assets": {
-                "large_image": state["large_image"],
-                "large_text": state["large_text"],
-                "small_image": state["small_image"],
-                "small_text": state["small_text"]
-            }
+            "assets": assets if assets else None
         }],
         "afk": False
     }
@@ -133,13 +137,12 @@ def restart_gateway():
         gateway_task = bot.loop.create_task(user_gateway())
 
 # ==========================================
-# INTERFACE UI (MODAIS E MENUS)
+# INTERFACE UI (CAIXAS DE TEXTO IGUAIS AO CUSTOMRP)
 # ==========================================
 class TokenModal(discord.ui.Modal, title='Configurar Token Pessoal'):
     token_input = discord.ui.TextInput(
         label='Token da sua conta do Discord',
         style=discord.TextStyle.short,
-        placeholder='Cole o seu token aqui',
         required=True
     )
     async def on_submit(self, interaction: discord.Interaction):
@@ -149,9 +152,9 @@ class TokenModal(discord.ui.Modal, title='Configurar Token Pessoal'):
         if config["rpc_active"]: restart_gateway()
 
 class RPCTextModal(discord.ui.Modal, title='Configurar Textos'):
-    name = discord.ui.TextInput(label='Nome Principal (O que está a jogar)', default=config["rpc_state"]["name"])
-    details = discord.ui.TextInput(label='Detalhes (Primeira linha abaixo)', default=config["rpc_state"]["details"])
-    state = discord.ui.TextInput(label='Estado (Segunda linha abaixo)', default=config["rpc_state"]["state"])
+    name = discord.ui.TextInput(label='Nome Principal (Ex: Nexzy Store)', default=config["rpc_state"]["name"])
+    details = discord.ui.TextInput(label='Detalhes (Primeira linha)', default=config["rpc_state"]["details"])
+    state = discord.ui.TextInput(label='Estado (Segunda linha)', default=config["rpc_state"]["state"])
 
     async def on_submit(self, interaction: discord.Interaction):
         config["rpc_state"]["name"] = self.name.value
@@ -161,36 +164,36 @@ class RPCTextModal(discord.ui.Modal, title='Configurar Textos'):
         await interaction.response.send_message("✅ Textos configurados!", ephemeral=True)
         if config["rpc_active"]: restart_gateway()
 
-class ImageSelect(discord.ui.Select):
-    def __init__(self):
-        opcoes = [
-            discord.SelectOption(label="Loja Principal", description="Mostra a imagem nexzy_store", value="nexzy_store", emoji="🛒"),
-            discord.SelectOption(label="Sem Imagem", description="Remove a imagem grande", value="none", emoji="❌")
-        ]
-        super().__init__(placeholder="🖼️ Escolha qual imagem exibir no perfil...", min_values=1, max_values=1, options=opcoes, row=2)
+class RPCImageModal(discord.ui.Modal, title='Configurar Imagens (Links)'):
+    app_id = discord.ui.TextInput(label='Client ID', default=config["rpc_state"]["application_id"])
+    
+    large_img = discord.ui.TextInput(
+        label='Link da Imagem Grande', 
+        style=discord.TextStyle.short,
+        placeholder='https://...', 
+        default=config["rpc_state"]["large_image"],
+        required=False
+    )
+    
+    small_img = discord.ui.TextInput(
+        label='Link da Imagem Pequena', 
+        style=discord.TextStyle.short,
+        placeholder='https://...', 
+        default=config["rpc_state"]["small_image"],
+        required=False
+    )
 
-    async def callback(self, interaction: discord.Interaction):
-        if config["owner_id"] and interaction.user.id != config["owner_id"]:
-            return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
-        
-        valor_escolhido = "" if self.values[0] == "none" else self.values[0]
-        
-        config["rpc_state"]["large_image"] = valor_escolhido
-        config["rpc_state"]["small_image"] = valor_escolhido
+    async def on_submit(self, interaction: discord.Interaction):
+        config["rpc_state"]["application_id"] = self.app_id.value
+        config["rpc_state"]["large_image"] = self.large_img.value
+        config["rpc_state"]["small_image"] = self.small_img.value
         save_config(config)
-        
-        if valor_escolhido == "":
-            await interaction.response.send_message("✅ Imagens removidas com sucesso!", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"✅ Imagem alterada para: **{self.values[0]}**", ephemeral=True)
-            
-        if config["rpc_active"]:
-            restart_gateway()
+        await interaction.response.send_message("✅ Links de imagem salvos! O Discord vai carregar agora.", ephemeral=True)
+        if config["rpc_active"]: restart_gateway()
 
 class PanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(ImageSelect())
 
     async def check_owner(self, interaction: discord.Interaction):
         if not config["owner_id"]:
@@ -207,10 +210,15 @@ class PanelView(discord.ui.View):
         if await self.check_owner(interaction):
             await interaction.response.send_modal(TokenModal())
 
-    @discord.ui.button(label="2. Alterar Textos", style=discord.ButtonStyle.secondary, emoji="📝", row=0)
+    @discord.ui.button(label="2. Textos", style=discord.ButtonStyle.secondary, emoji="📝", row=0)
     async def btn_text(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self.check_owner(interaction):
             await interaction.response.send_modal(RPCTextModal())
+
+    @discord.ui.button(label="3. Imagens (Links)", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
+    async def btn_img(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if await self.check_owner(interaction):
+            await interaction.response.send_modal(RPCImageModal())
 
     @discord.ui.button(label="Ligar RPC", style=discord.ButtonStyle.success, emoji="▶️", row=1)
     async def btn_start(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -236,18 +244,21 @@ class PanelView(discord.ui.View):
 # ==========================================
 @bot.event
 async def on_ready():
-    print(f"🤖 Painel online como: {bot.user}")
+    print(f"🤖 CustomRP Cloud online como: {bot.user}")
     await bot.tree.sync()
     if config.get("rpc_active") and config.get("user_token"):
         restart_gateway()
 
-@bot.tree.command(name="painel", description="Abre o painel de configuração do Rich Presence.")
+@bot.tree.command(name="painel", description="Abre o painel estilo CustomRP.")
 async def painel(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🎮 Painel de Controlo - Rich Presence",
-        description="Configure o seu perfil em tempo real.\n\n"
-                    "Basta colocar o token da sua conta, ajustar os textos e escolher a imagem no menu abaixo!",
-        color=discord.Color.blurple()
+        title="☁️ CustomRP na Nuvem (Portainer)",
+        description="Seu próprio CustomRP rodando 24 horas por dia.\n\n"
+                    "**Como usar as imagens:**\n"
+                    "1. Envie a foto num chat do Discord.\n"
+                    "2. Clique em 'Copiar link da imagem' (`https://cdn.discordapp...`).\n"
+                    "3. Clique em **3. Imagens (Links)** e cole o link lá!",
+        color=discord.Color.brand_green()
     )
     await interaction.response.send_message(embed=embed, view=PanelView())
 
